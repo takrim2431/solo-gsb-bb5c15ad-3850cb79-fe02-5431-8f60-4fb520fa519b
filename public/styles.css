@@ -548,6 +548,21 @@ code {
 .pac-result .path-node .badge,
 .pac-result .path-edge .badge { margin-left: 4px; }
 
+/* ---------- 结局保证到达（策略求解） ---------- */
+.stg-card { max-height: 46%; display: flex; flex-direction: column; }
+.stg-card .stg-result { overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.stg-hint { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; }
+.stg-row {
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px;
+  font-size: 12px; display: flex; flex-direction: column; gap: 4px; background: #fff;
+}
+.stg-row-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.stg-row-head .stg-scene { font-weight: 600; }
+.badge.stg-rank { background: var(--info-bg); color: var(--primary); }
+.stg-rec { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.stg-rec-label { font-size: 11px; color: var(--muted); font-weight: 700; }
+.stg-rec-text { color: var(--text); }
+
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);

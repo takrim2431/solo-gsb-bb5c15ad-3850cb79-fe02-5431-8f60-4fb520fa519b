@@ -1,6 +1,6 @@
 # 分支剧情一致性审校台（Branching Story Auditor）
 
-一个用于检查 **分支剧情 / 互动叙事脚本一致性** 的 Web 应用。支持为每个场景设置 **布尔前置条件、进入时状态赋值**，为每个选项设置 **显示条件、状态赋值、跳转目标和正整数权重**，并指定剧情起点。后端会从起点出发，按 **「场景 + 变量状态」组合状态** 进行穷举传播与去重，因此即使剧情包含环路（可反复返回的场景），分析也保证终止。基于同一状态图，还可以对编辑中的草稿做 **结局概率推演**：精确求解各终止场景的最终到达概率，并单独列出永远困在循环中的概率质量；生成 **选项覆盖路线**：用确定性贪心集合覆盖压缩出一组可执行路线，让所有实际可走的选项至少被走一遍；分析 **结局必经抉择**：精确求出每个可达终止场景的全部到达路线共同经过的稳定选项（含环、同场景多状态仍精确终止），并给出必经次序、最短见证路径与绕开反例查询；做 **伏笔回收路线校验**：选择铺垫场景与回收场景后，把「待回收」标记并入状态遍历，找出到达设计结局时伏笔仍未回收的最短违规路线；以及做 **节奏校验**：勾选高强度场景并设置允许的最长连续场景数（1～10），把「连续高强度计数」并入状态遍历（进非高强度即清零、环路中逐圈累计），找出连续高强度场景超限的最短路线并展示沿途场景、变量状态与连续计数。
+一个用于检查 **分支剧情 / 互动叙事脚本一致性** 的 Web 应用。支持为每个场景设置 **布尔前置条件、进入时状态赋值**，为每个选项设置 **显示条件、状态赋值、跳转目标和正整数权重**，并指定剧情起点。后端会从起点出发，按 **「场景 + 变量状态」组合状态** 进行穷举传播与去重，因此即使剧情包含环路（可反复返回的场景），分析也保证终止。基于同一状态图，还可以对编辑中的草稿做 **结局概率推演**：精确求解各终止场景的最终到达概率，并单独列出永远困在循环中的概率质量；生成 **选项覆盖路线**：用确定性贪心集合覆盖压缩出一组可执行路线，让所有实际可走的选项至少被走一遍；分析 **结局必经抉择**：精确求出每个可达终止场景的全部到达路线共同经过的稳定选项（含环、同场景多状态仍精确终止），并给出必经次序、最短见证路径与绕开反例查询；做 **伏笔回收路线校验**：选择铺垫场景与回收场景后，把「待回收」标记并入状态遍历，找出到达设计结局时伏笔仍未回收的最短违规路线；做 **节奏校验**：勾选高强度场景并设置允许的最长连续场景数（1～10），把「连续高强度计数」并入状态遍历（进非高强度即清零、环路中逐圈累计），找出连续高强度场景超限的最短路线并展示沿途场景、变量状态与连续计数；以及求解 **结局保证到达**：选定无选项的目标结局场景并指定环境控制场景（其余由玩家控制），用最小不动点反向扩展判定是否存在玩家策略，使环境任意选择合法选项都能在有限步内到达目标，可保证时给出每个获胜玩家状态的推荐选项与层级。
 
 ## 能发现什么问题
 
@@ -23,9 +23,13 @@
 docker compose up -d --build
 ```
 
+这一条命令即可完成全部准备工作：构建镜像时按 `package-lock.json` 精确安装依赖（`npm ci --omit=dev`），容器首次启动且数据目录为空时自动播种示例剧情（完成初始化），随后启动 Web 页面。
+
 启动后访问：
 
 > **http://localhost:3000**
+
+（容器内监听 `0.0.0.0:3000`，Compose 默认映射宿主机 `3000:3000`；需要改端口时修改 `docker-compose.yml` 中 `ports` 左侧的宿主机端口即可。）
 
 首次启动且数据目录为空时，会自动写入一份示例剧情 **《失落王权》**（其中刻意包含循环、不可达场景、恒假条件、悬空跳转等缺陷，方便直接体验审校功能）。
 
@@ -257,6 +261,22 @@ npm start
 
 响应要点：`ok`（是否通过）、`status`（`pass` / `violation` / `truncated` / `start-blocked`）、`truncated`、`query`（回显的 `highIntensityScenes` 明细与 `maxConsecutive`）、`maxStreak`（实际观测到的最长连续段）、`reachedHighScenes`（实际进入过的高强度场景；未列入者即不可达）、`violation`（超限时含 `sceneId` / `title` / `streak` 超限连续计数 / `depth` 选项步数 / `path` 场景与选项交替、场景节点带 `state` / `streak` / `highIntensity`、选项边带 `stateAfter` / `streakAfter` / `finalState`；无超限为 `null`）、`counts`、`knownVars`、`conditionErrors`、`statesExplored`、`maxStates`、`message`。
 
+## 结局保证到达（策略求解）
+
+编辑页右侧的「结局保证到达」面板回答：**“选定一个目标结局后，把一部分场景交给环境（随机 / 对抗）控制，玩家还存在必胜策略吗？——无论环境怎么选，都能在有限步内到达目标吗？”**
+
+1. 在面板中选择一个 **目标结局场景**（下拉框只列出 **无选项场景**；目标必须是无选项的终止场景，否则接口返回 400），并勾选若干 **环境控制场景**——这些场景中的合法选项由环境任意选择，**其余场景由玩家控制**；
+2. 点击「求解保证策略」，后端对 **编辑中的未保存草稿**（不落盘）展开「场景 + 完整变量状态」具体状态图（与分析器相同的 BFS 去重、条件 / 赋值 / 入口前置语义与约 100 万状态上限；**选项权重不参与判断**），每个具体状态按所在场景标记为玩家 / 环境状态；
+3. **最小不动点反向扩展（attractor）求获胜状态集**：目标结局的具体状态直接获胜（层级 0）；**玩家状态**至少一个后继已获胜即获胜（层级 = 1 + 获胜后继的最小层级）；**环境状态**必须有合法后继、且 **全部** 后继已获胜才获胜（层级 = 1 + 后继的最大层级，按环境最坏选择计）。非目标死局（没有任何合法选项）永远不胜；只能在循环中无限停留的状态也不会进入获胜集——不动点从目标反向生长，只有「有限步内必达目标」的状态才被纳入；
+4. **可保证时**（起点状态获胜，`status: 'guaranteed'`）：列出每个 **获胜玩家状态** 的完整变量取值、**推荐选项 UID** 与 **层级**——推荐边必然进入更低层级，玩家按推荐选择、环境无论怎么走，层级都严格下降，因此至多「起点层级」步内必达目标（列表按层级与场景排序，超过 500 条时截断展示，完整计数见 `counts`）；
+5. **无法保证时**（`status: 'not-guaranteed'`，完整探索后起点未获胜）：明确提示环境存在合法选择使目标无法在有限步内保证到达，并给出未获胜状态的构成诊断——**非目标死局** 状态数（进入即卡死）与 **可无限停留 / 仅通向未获胜状态** 状态数；
+6. **无法判定**：起点前置条件不成立（`start-blocked`）或状态上限截断（`truncated`，截断后环境状态的「全部后继已获胜」在未探索区域无法确认，不下任何结论）；
+7. 求解针对编辑中的草稿；**草稿或求解设置（目标结局 / 环境控制场景）被修改后，旧结果标记为「可能过期」**，重新「求解保证策略」即可。
+
+**API 校验（返回 400）**：缺少目标结局场景；目标场景不存在；**目标场景含有选项**（目标必须是无选项的终止场景）；环境控制场景列表不是数组、含空行或重复项、场景不存在、或把目标结局同时列为环境控制场景；剧情缺少有效起点。
+
+响应要点：`ok`（是否可保证）、`status`（`guaranteed` / `not-guaranteed` / `truncated` / `start-blocked`）、`truncated`、`query`（回显的目标结局与环境控制场景明细）、`start`（起点状态的 `sceneId` / `state` / `winning` / `rank`，`rank` 即保证到达的步数上界）、`counts`（`states` / `transitions` / `variables` / `playerStates` / `envStates` / `winningStates` / `winningPlayerStates` / `winningEnvStates` / `targetStates` / `losingStates` / `deadendStates` / `loopStates`；截断时获胜相关计数为 `null`）、`strategy`（获胜玩家状态列表：`sceneId` / `title` / `state` 完整变量取值 / `rank` 层级 / `recommendation`：`uid` 推荐选项稳定 UID（无 UID 的旧数据回退 `idx:场景#下标`）、`optionIndex` / `text` / `target` / `targetRank`，必有 `targetRank = rank - 1`）、`strategyTotal` / `strategyListed`、`statesExplored`、`maxStates`、`conditionErrors`、`message`。
+
 ## HTTP API
 
 | 方法 | 路径 | 说明 |
@@ -284,6 +304,8 @@ npm start
 | `POST` | `/api/stories/:id/foreshadow` | 对已保存剧情做伏笔回收路线校验，请求体即 `query` 或 `{ query }` |
 | `POST` | `/api/pacing` | 节奏校验（高强度场景连续段）：对请求体中的草稿剧情直接校验（不落盘），请求体 `{ story, query: { highIntensityScenes, maxConsecutive } }`（可注入测试用 `maxStates`） |
 | `POST` | `/api/stories/:id/pacing` | 对已保存剧情做节奏校验，请求体即 `query` 或 `{ query }` |
+| `POST` | `/api/strategy` | 结局保证到达（策略求解）：对请求体中的草稿剧情直接求解（不落盘），请求体 `{ story, query: { targetScene, environmentScenes } }`（可注入测试用 `maxStates`）；目标含选项等非法场景返回 400 |
+| `POST` | `/api/stories/:id/strategy` | 对已保存剧情求解结局保证到达策略，请求体即 `query` 或 `{ query }` |
 | `POST` | `/api/stories/:id/baseline` | 把请求体中的剧情分析结果保存为基线（同时落盘剧情），返回 `{ story, baseline, analysis }` |
 | `POST` | `/api/stories/:id/baseline/compare` | 基线对比；请求体可省略（对比已保存剧情）或传入编辑中的草稿，返回 `{ summary, items }` |
 | `DELETE` | `/api/stories/:id/baseline` | 删除基线（剧情内容不变） |
@@ -322,11 +344,20 @@ npm start
 }
 ```
 
+结局保证到达的 `query` 形如（`targetScene` 为无选项的目标结局场景 ID，必填；`environmentScenes` 为环境控制场景 ID 数组，可省略或为空，表示全部场景由玩家控制）：
+
+```json
+{
+  "targetScene": "ending",
+  "environmentScenes": ["forest", "castle"]
+}
+```
+
 ## 目录结构
 
 ```
 .
-├── server.js              # Express 入口与 REST API（含基线、目标路径查询、结局概率推演、结局必经抉择、选项覆盖路线与逐步回放、伏笔回收路线校验、节奏校验接口）
+├── server.js              # Express 入口与 REST API（含基线、目标路径查询、结局概率推演、结局必经抉择、选项覆盖路线与逐步回放、伏笔回收路线校验、节奏校验、结局保证到达策略求解接口）
 ├── src/
 │   ├── expression.js      # 布尔表达式递归下降解析器 / 求值 / 失败解释
 │   ├── analyzer.js        # 「场景+状态」BFS 传播去重分析引擎（附带问题指纹）
@@ -337,6 +368,7 @@ npm start
 │   ├── replay.js          # 覆盖路线逐步回放：按稳定 UID 用当前草稿逐步重校验，停在首个分歧点
 │   ├── foreshadow.js      # 伏笔回收路线校验：待回收标记并入状态遍历，求最短违规路线
 │   ├── pacing.js          # 节奏校验：连续高强度计数并入状态遍历（进非高强度清零、环上累计），求最短超限路线
+│   ├── strategy.js        # 结局保证到达：最小不动点反向扩展求获胜状态集与玩家推荐策略（含层级）
 │   ├── weight.js          # 选项正整数权重的统一校验（保存 / 导入 / 推演共用）
 │   ├── fingerprint.js     # 不依赖数组顺序的问题稳定指纹
 │   ├── baseline.js        # 基线快照构建与新增/已修复/仍存在/详情变化对比
@@ -358,6 +390,7 @@ npm start
 │   ├── replay.js          # 覆盖路线逐步回放与 API 自检（node test/replay.js）
 │   ├── foreshadow.js      # 伏笔回收路线校验（违规 / 通过 / 铺垫不可达 / 无结局 / 截断）与 API 自检（node test/foreshadow.js）
 │   ├── pacing.js          # 节奏校验（超限 / 通过 / 清零 / 环上累计 / 截断）与 API 自检（node test/pacing.js）
+│   ├── strategy.js        # 结局保证到达（可保证 / 无法保证 / 环境对抗 / 推荐层级 / 截断）与 API 自检（node test/strategy.js）
 │   └── healthcheck.js     # 健康检查探针回归测试（node test/healthcheck.js）
 ├── Dockerfile
 └── docker-compose.yml
@@ -366,7 +399,7 @@ npm start
 自检：
 
 ```bash
-npm test          # 依次运行 smoke.js、baseline.js、pathquery.js、probability.js、forcedchoice.js、coverage.js、replay.js、foreshadow.js、pacing.js 与 healthcheck.js
+npm test          # 依次运行 smoke.js、baseline.js、pathquery.js、probability.js、forcedchoice.js、coverage.js、replay.js、foreshadow.js、pacing.js、strategy.js 与 healthcheck.js
 ```
 
 ## 技术栈
