@@ -11,6 +11,7 @@ const { replayRoute } = require('./src/replay');
 const { analyzeForcedChoices, bypassForced } = require('./src/forcedchoice');
 const { checkForeshadow } = require('./src/foreshadow');
 const { checkPacing } = require('./src/pacing');
+const { solveStrategy } = require('./src/strategy');
 const { buildBaseline, compareWithBaseline } = require('./src/baseline');
 
 const app = express();
@@ -221,6 +222,30 @@ app.post('/api/stories/:id/pacing', wrap((req, res) => {
   const body = req.body || {};
   const query = body.query !== undefined ? body.query : body;
   res.json(checkPacing(story, query));
+}));
+
+// ---- 结局保证到达（玩家策略求解）：对请求体中的草稿剧情直接求解（不落盘），供编辑页面板实时使用 ----
+// 请求体：{ story: <剧情>, query: { targetScene, environmentScenes: [场景ID...] } }
+// 沿用现有条件 / 赋值 / 入口语义，在「场景 + 完整变量状态」图上用最小不动点反向扩展：
+// 玩家状态至少一个后继已获胜即获胜；环境状态须有合法后继且全部后继已获胜才获胜；
+// 选项权重不参与判断。目标必须是无选项场景；非目标死局与可无限停留的循环都不算成功。
+// 起点已获胜 => 列出获胜玩家状态的变量值、推荐选项 UID 与层级（推荐必进入更低层级）；
+// 起点未获胜 => 明确无法保证并给出环境反制见证（死局路线 / 无限循环 / 目标不可达）；
+// 起点受阻或状态上限截断 => 无法判定。目标含选项 / 场景不存在 / 列表非法等返回 400。
+app.post('/api/strategy', wrap((req, res) => {
+  const body = req.body || {};
+  const story = body.story !== undefined ? body.story : body;
+  const opts = Number.isInteger(body.maxStates) && body.maxStates > 0 ? { maxStates: body.maxStates } : {};
+  res.json(solveStrategy(story, body.query || {}, opts));
+}));
+
+// ---- 对已保存的剧情求解结局保证到达（请求体即 query 或 { query }） ----
+app.post('/api/stories/:id/strategy', wrap((req, res) => {
+  const story = storage.getStory(req.params.id);
+  if (!story) return res.status(404).json({ error: '剧情不存在' });
+  const body = req.body || {};
+  const query = body.query !== undefined ? body.query : body;
+  res.json(solveStrategy(story, query));
 }));
 
 // ---- 分析基线：把当前（通常是编辑中的）分析结果保存为基线，随剧情 JSON 持久化 ----

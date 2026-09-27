@@ -2,9 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# 仅拷贝依赖清单，优先利用层缓存
-COPY package.json ./
-RUN npm install --omit=dev
+# 仅拷贝依赖清单与锁文件，优先利用层缓存；npm ci 按锁文件精确安装，构建可复现
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 # 拷贝应用源码
 COPY server.js ./

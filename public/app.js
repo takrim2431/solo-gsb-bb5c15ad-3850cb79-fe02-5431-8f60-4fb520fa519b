@@ -35,6 +35,10 @@ const state = {
   pacResult: null,        // 最近一次节奏校验结果
   pacStale: false,        // 校验之后剧情或校验设置又被修改过
   _pacSig: null,          // 节奏面板场景签名（避免每次编辑都重建勾选列表）
+  strategy: { targetScene: '', environmentScenes: [] }, // 结局保证到达设置（编辑中；目标结局 + 环境控制场景 ID）
+  stgResult: null,        // 最近一次结局保证到达求解结果
+  stgStale: false,        // 求解之后剧情或求解设置又被修改过
+  _stgSig: null,          // 策略面板场景签名（避免每次编辑都重建下拉框与勾选列表）
   dirty: false,
   saving: false,
 };
@@ -108,6 +112,10 @@ async function openStory(id) {
   state.pacResult = null;
   state.pacStale = false;
   state._pacSig = null;
+  state.strategy = { targetScene: '', environmentScenes: [] };
+  state.stgResult = null;
+  state.stgStale = false;
+  state._stgSig = null;
   $('storySelect').value = id;
   renderAll();
   await runAnalysis(false);
@@ -185,6 +193,10 @@ async function deleteStory() {
   state.pacResult = null;
   state.pacStale = false;
   state._pacSig = null;
+  state.strategy = { targetScene: '', environmentScenes: [] };
+  state.stgResult = null;
+  state.stgStale = false;
+  state._stgSig = null;
   const next = await loadList();
   if (next) await openStory(next);
   else { renderAll(); toast('已删除'); }
@@ -234,6 +246,7 @@ function renderAll() {
   renderCoveragePanel();
   renderForeshadowPanel();
   renderPacingPanel();
+  renderStrategyPanel();
   renderDetail(null);
 }
 
@@ -555,6 +568,7 @@ function markDirty(rerender) {
   markCoverageStale();
   markForeshadowStale();
   markPacingStale();
+  markStrategyStale();
   renderSaveStatus();
   if (rerender) rerender();
   else renderAnalysis();
@@ -564,6 +578,7 @@ function markDirty(rerender) {
   renderCoveragePanel(); // 仅刷新过期提示与已展示的路线，不重新生成
   renderForeshadowPanel(); // 内部有签名缓存，场景未变时仅刷新过期提示与结果
   renderPacingPanel(); // 内部有签名缓存，场景未变时仅刷新过期提示与结果
+  renderStrategyPanel(); // 内部有签名缓存，场景未变时仅刷新过期提示与结果
   clearTimeout(reanalyzeTimer);
   reanalyzeTimer = setTimeout(() => runAnalysis(true), 500);
 }
@@ -2598,6 +2613,295 @@ function renderPacingResult() {
   }
 }
 
+/* ============================================================
+ * 结局保证到达（玩家策略求解）
+ * ============================================================ */
+function stgSignature() {
+  if (!state.story) return '';
+  // 场景集合（ID / 标题 / 选项数）变化时才重建下拉框与勾选行：
+  // 选项数影响「无选项场景」集合（目标结局候选）
+  return JSON.stringify(state.story.scenes.map((s) => [s.id, s.title || '', (s.options || []).length]));
+}
+
+function markStrategyStale() {
+  if (!state.stgResult) return;
+  state.stgStale = true;
+  const el = $('stgStale');
+  if (el) el.hidden = false;
+}
+
+function renderStrategyPanel() {
+  const card = $('stgCard');
+  if (!state.story) { card.hidden = true; return; }
+  card.hidden = false;
+
+  // 仅当场景集合（含选项数）变化时才重建下拉框与勾选行，避免打断正在进行的交互
+  const sig = stgSignature();
+  if (sig !== state._stgSig) {
+    state._stgSig = sig;
+    // 场景被删除 / 改名时自动从设置中剔除；目标场景若变得含选项也一并清除
+    const valid = new Set(state.story.scenes.map((s) => s.id));
+    state.strategy.environmentScenes = state.strategy.environmentScenes.filter((id) => valid.has(id));
+    const targetScene = state.story.scenes.find((s) => s.id === state.strategy.targetScene);
+    if (state.strategy.targetScene && (!targetScene || (targetScene.options || []).length > 0)) {
+      state.strategy.targetScene = '';
+    }
+    renderStgTarget();
+    renderStgEnvScenes();
+  }
+
+  $('stgStale').hidden = !state.stgStale;
+  renderStrategyResult();
+}
+
+/** 目标结局下拉框：仅列出无选项的场景 */
+function renderStgTarget() {
+  const sel = $('stgTarget');
+  sel.innerHTML = '';
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = '（选择目标结局场景）';
+  sel.appendChild(ph);
+  for (const sc of state.story.scenes) {
+    if ((sc.options || []).length > 0) continue; // 目标必须是无选项场景
+    const opt = document.createElement('option');
+    opt.value = sc.id;
+    opt.textContent = `${sc.id}${sc.title ? ' — ' + sc.title : ''}`;
+    sel.appendChild(opt);
+  }
+  sel.value = state.strategy.targetScene || '';
+}
+
+/** 环境控制场景勾选列表（未勾选的场景由玩家控制） */
+function renderStgEnvScenes() {
+  const box = $('stgEnvScenes');
+  box.innerHTML = '';
+  const selected = new Set(state.strategy.environmentScenes);
+  for (const sc of state.story.scenes) {
+    const label = document.createElement('label');
+    label.className = 'pac-scene-row';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selected.has(sc.id);
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        if (!state.strategy.environmentScenes.includes(sc.id)) state.strategy.environmentScenes.push(sc.id);
+      } else {
+        state.strategy.environmentScenes = state.strategy.environmentScenes.filter((id) => id !== sc.id);
+      }
+      markStrategyStale();
+    });
+    const span = document.createElement('span');
+    span.textContent = `${sc.id}${sc.title ? ' — ' + sc.title : ''}`;
+    label.append(cb, span);
+    box.appendChild(label);
+  }
+}
+
+async function runStrategy() {
+  if (!state.story) return;
+  const targetScene = state.strategy.targetScene;
+  if (!targetScene) return toast('请先选择一个目标结局场景（无选项的场景）');
+  const target = state.story.scenes.find((s) => s.id === targetScene);
+  if (!target || (target.options || []).length > 0) {
+    return toast('目标结局必须是无选项场景，请重新选择');
+  }
+
+  try {
+    // 对编辑中的未保存草稿直接求解（不落盘）
+    state.stgResult = await api('POST', '/api/strategy', {
+      story: state.story,
+      query: { targetScene, environmentScenes: state.strategy.environmentScenes },
+    });
+    state.stgStale = false;
+    renderStrategyPanel();
+  } catch (e) {
+    toast(`结局保证到达求解失败：${e.message}`);
+  }
+}
+
+const STG_STATUS_META = {
+  guaranteed: { cls: 'pq-ok', icon: '✓' },
+  unguaranteed: { cls: 'pq-err', icon: '✗' },
+  truncated: { cls: 'pq-warn', icon: '⚠' },
+  'start-blocked': { cls: 'pq-err', icon: '✗' },
+};
+
+const STG_REASON_LABEL = {
+  deadend: '非目标死局',
+  loop: '可无限停留的循环',
+  unreachable: '目标不可达',
+};
+
+/** 控制方徽标：环境 / 玩家 */
+function stgControllerBadge(controller) {
+  return controller === 'env'
+    ? '<span class="badge badge-warn">环境</span>'
+    : '<span class="badge badge-ok">玩家</span>';
+}
+
+/** 环境反制见证路线：场景节点带控制方与循环标记，选项边带选择后状态 */
+function buildStrategyPathView(path, knownVars) {
+  const wrap = document.createElement('div');
+  wrap.className = 'path-view';
+  (path || []).forEach((node, i, arr) => {
+    if (node.kind === 'scene') {
+      const div = document.createElement('div');
+      div.className = 'path-node scene';
+      let badge = i === 0 ? '<span class="badge badge-ok">起点</span>' : '';
+      badge += stgControllerBadge(node.controller);
+      if (node.inCycle) badge += '<span class="badge badge-req">循环中</span>';
+      if (node.terminal) badge += '<span class="badge badge-err">非目标死局 · 剧情停滞</span>';
+      else if (i === arr.length - 1 && node.inCycle) badge += '<span class="badge badge-err">回到循环入口</span>';
+      div.innerHTML = `<span class="pn-title"></span><span class="pn-id"></span>${badge}`;
+      div.querySelector('.pn-title').textContent = node.title || node.sceneId;
+      div.querySelector('.pn-id').textContent = node.sceneId;
+      div.insertAdjacentHTML('beforeend', stateChips(node.state, knownVars || []));
+      wrap.appendChild(div);
+    } else {
+      const div = document.createElement('div');
+      div.className = 'path-edge';
+      div.appendChild(document.createTextNode(
+        `选项 ${node.optionIndex + 1}「${node.optionText || ''}」 → ${node.target}`));
+      if (node.optionUid) {
+        const uid = document.createElement('code');
+        uid.className = 'cov-uid';
+        uid.textContent = node.optionUid;
+        div.appendChild(uid);
+      }
+      div.insertAdjacentHTML('beforeend', stgControllerBadge(node.controller));
+      if (node.stateAfter) {
+        div.insertAdjacentHTML('beforeend', stateChips(node.stateAfter, knownVars || []));
+      }
+      wrap.appendChild(div);
+    }
+  });
+  return wrap;
+}
+
+function renderStrategyResult() {
+  const box = $('stgResult');
+  box.innerHTML = '';
+  const r = state.stgResult;
+  if (!r || !state.story) return;
+
+  const meta = STG_STATUS_META[r.status] || { cls: 'pq-warn', icon: '⚠' };
+  const banner = document.createElement('div');
+  banner.className = `pq-banner ${meta.cls}`;
+  banner.textContent = `${meta.icon} ${r.message}`;
+  box.appendChild(banner);
+
+  if (r.conditionErrors && r.conditionErrors.length) {
+    const note = document.createElement('div');
+    note.className = 'pq-note';
+    note.textContent = `剧情中存在 ${r.conditionErrors.length} 处条件语法错误，本次求解按恒真处理（详见一致性分析）。`;
+    box.appendChild(note);
+  }
+
+  if (r.startBlocked) return;
+
+  // 统计
+  const verdict = { guaranteed: '可保证', unguaranteed: '无法保证' }[r.status] || '无法判定';
+  const verdictCls = r.status === 'guaranteed' ? 'stat-ok' : (r.status === 'unguaranteed' ? 'stat-bad' : 'stat-warn');
+  const stats = document.createElement('div');
+  stats.className = 'stats';
+  const envCount = r.query.environmentScenes.length;
+  stats.innerHTML = `
+    <div class="stat ${verdictCls}"><span>求解结论</span><b>${verdict}</b></div>
+    <div class="stat"><span>目标结局</span><b>${r.query.targetScene}</b></div>
+    <div class="stat"><span>环境控制场景</span><b>${envCount}</b></div>
+    <div class="stat"><span>枚举具体状态</span><b>${r.counts.states}</b></div>
+    <div class="stat"><span>玩家 / 环境状态</span><b>${r.counts.playerStates ?? '—'} / ${r.counts.envStates ?? '—'}</b></div>
+    <div class="stat"><span>布尔变量</span><b>${r.counts.variables}</b></div>
+  `;
+  box.appendChild(stats);
+
+  // 可保证：起点信息 + 获胜玩家状态表（变量值、推荐选项 UID 与层级）
+  if (r.status === 'guaranteed') {
+    if (r.start && r.start.rank > 0) {
+      const startNote = document.createElement('div');
+      startNote.className = 'pq-note';
+      startNote.textContent = `起点（${r.start.sceneId}）的保证层级为 ${r.start.rank}：`
+        + '玩家沿推荐选项选择时，无论环境如何选择，层级每步严格下降，最坏 '
+        + `${r.start.rank} 步内到达目标结局。`;
+      box.appendChild(startNote);
+    }
+
+    if (r.winningStates && r.winningStates.length) {
+      const label = document.createElement('div');
+      label.className = 'cov-section-label';
+      label.textContent = `获胜玩家状态（${r.winningStates.length} 个：变量值、推荐选项与层级；推荐均进入更低层级）`;
+      box.appendChild(label);
+
+      const det = document.createElement('details');
+      det.className = 'stg-win-list';
+      det.open = r.winningStates.length <= 12;
+      const sum = document.createElement('summary');
+      sum.textContent = `展开 / 收起全部 ${r.winningStates.length} 个获胜玩家状态`;
+      det.appendChild(sum);
+      const body = document.createElement('div');
+      body.className = 'stg-win-body';
+      for (const w of r.winningStates) {
+        const row = document.createElement('div');
+        row.className = 'stg-win-row';
+        const head = document.createElement('div');
+        head.className = 'stg-win-head';
+        head.innerHTML = `<span class="stg-win-scene"></span>`
+          + `<span class="badge badge-ok">层级 ${w.rank}</span>`
+          + (w.sceneId === r.startScene ? '<span class="badge badge-muted">含起点状态</span>' : '');
+        head.querySelector('.stg-win-scene').textContent = `${w.title || w.sceneId}（${w.sceneId}）`;
+        row.appendChild(head);
+        row.insertAdjacentHTML('beforeend', stateChips(w.state, r.knownVars || []));
+        if (w.recommend) {
+          const rec = document.createElement('div');
+          rec.className = 'stg-win-rec';
+          rec.innerHTML = `<span class="stg-rec-label">推荐选项</span>`
+            + `<span class="stg-rec-text"></span><code class="cov-uid"></code>`
+            + `<span class="stg-rec-target"></span>`
+            + `<span class="badge badge-ok">→ 层级 ${w.recommend.nextRank}</span>`;
+          rec.querySelector('.stg-rec-text').textContent = `「${w.recommend.text || '（无文案）'}」`;
+          rec.querySelector('code.cov-uid').textContent = w.recommend.uid;
+          rec.querySelector('.stg-rec-target').textContent = `→ ${w.recommend.target}`;
+          row.appendChild(rec);
+        }
+        body.appendChild(row);
+      }
+      det.appendChild(body);
+      box.appendChild(det);
+    }
+    return;
+  }
+
+  // 无法保证：失败原因 + 环境反制见证
+  if (r.status === 'unguaranteed' && r.failure) {
+    const f = r.failure;
+    const reason = document.createElement('div');
+    reason.className = 'stats';
+    reason.innerHTML = `
+      <div class="stat stat-bad"><span>失败原因</span><b>${STG_REASON_LABEL[f.reason] || f.reason}</b></div>
+      <div class="stat"><span>目标从起点可达</span><b>${f.targetReachable ? '是' : '否'}</b></div>
+    `;
+    box.appendChild(reason);
+
+    if (f.cycleScenes && f.cycleScenes.length) {
+      const cyc = document.createElement('div');
+      cyc.className = 'pq-note';
+      cyc.textContent = `循环涉及的场景：${f.cycleScenes.map((c) => `${c.title || c.sceneId}（${c.sceneId}）`).join('、')}`
+        + '——环境可让剧情在这些场景间无限绕圈，永不到达目标。';
+      box.appendChild(cyc);
+    }
+    if (f.witnessPath && f.witnessPath.length) {
+      const label = document.createElement('div');
+      label.className = 'cov-section-label';
+      label.textContent = f.reason === 'deadend'
+        ? `环境反制路线（到达非目标死局「${f.deadendScene.title || f.deadendScene.sceneId}」后剧情停滞）`
+        : '环境反制路线（进入循环后可无限停留）';
+      box.appendChild(label);
+      box.appendChild(buildStrategyPathView(f.witnessPath, r.knownVars));
+    }
+  }
+}
+
 function fmtTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -3020,6 +3324,11 @@ function bindGlobalEvents() {
     }
     state.pacing.maxConsecutive = v;
     markPacingStale();
+  });
+  $('btnRunStrategy').addEventListener('click', runStrategy);
+  $('stgTarget').addEventListener('change', (e) => {
+    state.strategy.targetScene = e.target.value;
+    markStrategyStale();
   });
   $('btnCloseDetail').addEventListener('click', () => $('detailPanel').hidden = true);
   $('btnSaveBaseline').addEventListener('click', saveBaseline);

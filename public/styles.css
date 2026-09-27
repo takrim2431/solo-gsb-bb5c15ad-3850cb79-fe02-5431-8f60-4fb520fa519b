@@ -548,6 +548,35 @@ code {
 .pac-result .path-node .badge,
 .pac-result .path-edge .badge { margin-left: 4px; }
 
+/* ---------- 结局保证到达（玩家策略求解） ---------- */
+.stg-card { max-height: 56%; display: flex; flex-direction: column; }
+.stg-card .stg-result { overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.stg-hint { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; }
+.stg-result .path-node .badge,
+.stg-result .path-edge .badge { margin-left: 4px; }
+.stg-win-list { border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.stg-win-list > summary {
+  cursor: pointer; padding: 7px 10px; font-size: 12.5px; font-weight: 600;
+  list-style: none; color: var(--muted);
+}
+.stg-win-list > summary::-webkit-details-marker { display: none; }
+.stg-win-list > summary::before { content: '▸ '; }
+.stg-win-list[open] > summary::before { content: '▾ '; }
+.stg-win-body { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 7px; }
+.stg-win-row {
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px;
+  display: flex; flex-direction: column; gap: 5px; background: #fff;
+}
+.stg-win-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+.stg-win-scene { font-weight: 700; }
+.stg-win-rec {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 12px; border-top: 1px dashed var(--border); padding-top: 5px;
+}
+.stg-rec-label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.stg-rec-text { font-weight: 600; }
+.stg-rec-target { color: var(--muted); }
+
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);

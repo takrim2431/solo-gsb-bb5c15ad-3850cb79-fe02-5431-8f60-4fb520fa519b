@@ -222,6 +222,24 @@
         <div id="pacResult" class="pac-result"></div>
       </section>
 
+      <section id="stgCard" class="card stg-card" hidden>
+        <div class="card-head">
+          <h2>结局保证到达</h2>
+          <button id="btnRunStrategy" class="btn btn-small btn-primary">检查可保证性</button>
+        </div>
+        <div class="stg-hint">选择一个<b>目标结局</b>（必须是无选项场景），并勾选<b>环境控制场景</b>（其余场景由玩家控制）：在「场景 + 完整变量状态」图上用最小不动点反向扩展求解——玩家状态至少一个后继已获胜即获胜，环境状态须有合法后继且<b>全部</b>后继已获胜才获胜；选项权重不参与判断。若存在玩家策略使环境任意选择合法选项都能在有限步内到达目标，列出每个获胜玩家状态的变量值、推荐选项 UID 与层级（推荐必进入更低层级）；<b>非目标死局与可无限停留的循环都不算成功</b>，无法保证时给出环境反制见证。</div>
+        <label class="field">
+          <span>目标结局（仅列出无选项的场景）</span>
+          <select id="stgTarget"></select>
+        </label>
+        <div class="field">
+          <span>环境控制场景（这些场景中的合法选项由环境任意选择；其余场景由玩家控制）</span>
+          <div id="stgEnvScenes" class="pac-scene-list"></div>
+        </div>
+        <div id="stgStale" class="diff-stale" hidden>⚠ 剧情或求解设置已修改，以下结果可能过期，请重新「检查可保证性」</div>
+        <div id="stgResult" class="stg-result"></div>
+      </section>
+
       <section id="detailPanel" class="card detail-card" hidden>
         <div class="card-head">
           <h2 id="detailTitle">问题详情</h2>
